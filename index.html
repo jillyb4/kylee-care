@@ -48,8 +48,18 @@ const ALL_PORTLAND_BLOCKS = [
   { start: "2026-08-02", end: "2026-08-20", note: "Parents out of country" },
 ];
 
+// Days when Kylee is at Mom's/Ridgefield despite normal schedule saying Portland
+const LOCATION_OVERRIDES = {
+  "2026-07-30": { loc: "moms", label: "2:30–10:00 PM" }, // Thu
+  "2026-07-31": { loc: "moms", label: "2:30–10:00 PM" }, // Fri
+  "2026-08-01": { loc: "moms", label: "9:00 AM–5:00 PM" }, // Sat (no shift – concert)
+  "2026-08-21": { loc: "moms", label: "2:30–10:00 PM" }, // Fri
+  "2026-08-22": { loc: "moms", label: "9:00 AM–5:00 PM" }, // Sat
+  "2026-08-25": { loc: "moms", label: "2:30–10:00 PM" }, // Tue
+};
+
 const MEDICAL_APPTS = {
-  "2026-03-11": { appt: "Pediatric Echo Lab", apptTime: "10:45 AM", label: "Standard Wed shift — no early nursing", location: "OHSU Doernbecher", noEarlyNurse: true },
+  "2026-03-11": { appt: "Pediatric Echo Lab", apptTime: "10:45 AM", label: "2:30–10:00 PM", location: "OHSU Doernbecher", noEarlyNurse: true },
   "2026-05-15": { appt: "Office Visit",       apptTime: "10:30 AM", label: "9:30 AM–5:30 PM",  location: "OHSU Doernbecher"   },
   "2026-06-02": { appt: "Neurology/Botox",    apptTime: "2:00 PM",  label: "1:00 PM–9:00 PM",  location: "OHSU Doernbecher"   },
   "2026-06-08": { appt: "Endocrinology",      apptTime: "10:30 AM", label: "9:30 AM–5:30 PM",  location: "Randall Children's" },
@@ -98,7 +108,7 @@ function getDayData(y,m,d,confirmed){
 
   let loc=std.loc, label=std.label, note=null, isMedical=false;
 
-  if(isIntensive){ loc="cit"; label="7:30 AM–6:00 PM"; }
+  if(isIntensive){ loc="papas"; label="7:30 AM–6:00 PM"; }
   else if(med){
     isMedical=true; label=med.label;
     note=`🔵 ${med.appt} — ${med.apptTime}`;
@@ -107,7 +117,14 @@ function getDayData(y,m,d,confirmed){
   else if(portlandBlock){ loc="papas"; note=`⚠️ ${portlandBlock.note}`; }
   else if(noSchool){ label="7:30 AM–5:00 PM"; }
 
-  return {ds,loc,label,note,nurse:confirmed[ds]||null,isIntensive,isMedical};
+  // Apply location override (specific days Kylee is at Mom's despite normal Portland schedule)
+  const override=LOCATION_OVERRIDES[ds];
+  if(override && !isIntensive && !isMedical){ loc=override.loc; label=override.label; note=null; }
+
+  const isTherapy = !isIntensive && !isMedical && [2,4].includes(dow);
+  const therapyTime = dow===2 ? "2–3 PM" : dow===4 ? "2–6 PM" : null;
+
+  return {ds,loc,label,note,nurse:confirmed[ds]||null,isIntensive,isMedical,isTherapy,therapyTime};
 }
 
 function buildGrid(y,m){
@@ -150,32 +167,39 @@ function DayCell({d,y,m,confirmed,selected,onClick}){
   const isToday=isoDate(y,m,d)===new Date().toISOString().slice(0,10);
   const {isCancelled,nurse,isMedical,isIntensive}=data;
 
-  const bg=isCancelled?"#F9FAFB":isIntensive?LOCATIONS.cit.light:loc.light;
-  const border=selected?"#1A7A6E":isToday?"#F59E0B":isCancelled?"#E5E7EB":loc.color+"50";
+  const statusColor = isCancelled ? "#E5E7EB" : nurse ? "#059669" : "#F59E0B";
+  const locBorder = selected?"#1A7A6E":isToday?"#F59E0B":isCancelled?"#E5E7EB":loc.color+"50";
+  const bg = isCancelled ? "#F9FAFB" : !nurse ? "#FFFBEB" : loc.light;
 
   return (
     <div onClick={()=>onClick(d)} style={{
-      background:bg,border:`2px solid ${border}`,borderRadius:10,
-      padding:"7px 8px",minHeight:74,cursor:"pointer",
+      background:bg,
+      border:`1.5px solid ${locBorder}`,
+      borderLeft:`6px solid ${statusColor}`,
+      borderRadius:10,
+      padding:"7px 6px 7px 7px",minHeight:80,cursor:"pointer",
       transition:"all 0.15s",opacity:isCancelled?0.55:1,
       boxShadow:selected?`0 0 0 3px #1A7A6E30`:isToday?`0 0 0 3px #F59E0B30`:"none",
     }}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:3}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:2}}>
         <span style={{fontWeight:isToday?800:600,fontSize:12,fontFamily:"'DM Mono',monospace",
           color:isToday?"#F59E0B":isCancelled?"#9CA3AF":loc.color}}>{d}</span>
         {isCancelled && <span style={{fontSize:8,color:"#9CA3AF",border:"1px solid #E5E7EB",borderRadius:3,padding:"1px 3px"}}>⬜</span>}
-        {!isCancelled && <span style={{fontSize:8,fontWeight:700,
-          background:isMedical?"#EFF6FF":nurse?"#10B98120":"#F59E0B20",
-          color:isMedical?"#2563EB":nurse?"#059669":"#D97706",
-          border:`1px solid ${isMedical?"#93C5FD":nurse?"#10B98140":"#F59E0B40"}`,
-          borderRadius:3,padding:"1px 4px"}}>
-          {isMedical?"🔵":nurse?"✓":"?"}
-        </span>}
+        {!isCancelled && (
+          <div style={{display:"flex",gap:2,alignItems:"center"}}>
+            {isIntensive && <span style={{fontSize:9,lineHeight:1}}>🟣</span>}
+            {isMedical && <span style={{fontSize:9,lineHeight:1}}>🔵</span>}
+          </div>
+        )}
       </div>
       {!isCancelled && <>
-        <div style={{fontSize:9,color:loc.color,fontWeight:700,lineHeight:1.3}}>{loc.icon} {data.label}</div>
-        {nurse && <div style={{fontSize:8,color:"#059669",fontWeight:600,marginTop:2}}>{nurse}</div>}
-        {isMedical && <div style={{fontSize:8,color:"#2563EB",marginTop:2,lineHeight:1.2}}>{data.note}</div>}
+        <div style={{fontSize:9,color:loc.color,fontWeight:700,lineHeight:1.3}}>{data.label}</div>
+        {data.isTherapy && <div style={{fontSize:8,color:"#8B3A8B",fontWeight:600,marginTop:1}}>🟣 therapy {data.therapyTime}</div>}
+        {nurse
+          ? <div style={{fontSize:9,color:"#065F46",fontWeight:700,marginTop:3,background:"#D1FAE5",borderRadius:4,padding:"2px 5px",display:"inline-block",maxWidth:"100%",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",border:"1px solid #6EE7B7"}}>✓ {nurse}</div>
+          : <div style={{fontSize:9,color:"#92400E",fontWeight:800,marginTop:3,background:"#FEF3C7",borderRadius:4,padding:"2px 5px",display:"inline-block",border:"1px solid #FCD34D"}}>⚠ OPEN</div>
+        }
+        {!nurse && isMedical && <div style={{fontSize:8,color:"#2563EB",marginTop:2,lineHeight:1.2}}>{data.note}</div>}
       </>}
       {isCancelled && <>
         <div style={{fontSize:9,color:"#9CA3AF",fontWeight:600}}>No shift</div>
@@ -276,7 +300,7 @@ function Detail({d,y,m,confirmed,onClose,onSave,onRemove}){
           <div style={{fontSize:10,fontWeight:700,color:"#2563EB",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>🔵 Medical Appointment</div>
           <div style={{fontSize:13,fontWeight:600,color:"#1E3A8A"}}>{med.appt} — {med.apptTime}</div>
           <div style={{fontSize:11,color:"#3B82F6",marginTop:2}}>{med.location}</div>
-          <div style={{fontSize:11,color:"#6B7280",marginTop:4}}>{med.noEarlyNurse ? "Standard shift — no early start needed" : "Shift starts 1 hr before · minimum 8 hrs"}</div>
+          {!med.noEarlyNurse && <div style={{fontSize:11,color:"#6B7280",marginTop:4}}>Shift starts 1 hr before · minimum 8 hrs</div>}
         </div>
       )}
     </div>
@@ -397,20 +421,25 @@ function App(){
       </div>
 
       <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap"}}>
-        {Object.entries(LOCATIONS).filter(([k])=>k!=="none").map(([k,v])=>(
+        {Object.entries(LOCATIONS).filter(([k])=>k!=="none"&&k!=="cit").map(([k,v])=>(
           <div key={k} style={{display:"flex",alignItems:"center",gap:5,background:"#fff",borderRadius:8,padding:"5px 11px",border:`1.5px solid ${v.color}40`,fontSize:11}}>
             <div style={{width:8,height:8,borderRadius:2,background:v.color}}/>
             <span style={{color:"#374151",fontWeight:500}}>{v.icon} {v.label}</span>
           </div>
         ))}
-        <div style={{display:"flex",alignItems:"center",gap:5,background:"#fff",borderRadius:8,padding:"5px 11px",border:"1.5px solid #10B98140",fontSize:11}}>
-          <span style={{color:"#059669",fontWeight:700}}>✓</span><span style={{color:"#374151",fontWeight:500}}>Confirmed</span>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:5,background:"#fff",borderRadius:8,padding:"5px 11px",border:"1.5px solid #F59E0B40",fontSize:11}}>
-          <span style={{color:"#D97706",fontWeight:700}}>?</span><span style={{color:"#374151",fontWeight:500}}>Needs coverage</span>
+        <div style={{display:"flex",alignItems:"center",gap:5,background:"#fff",borderRadius:8,padding:"5px 11px",border:"1.5px solid #8B3A8B40",fontSize:11}}>
+          <span style={{fontSize:10}}>🟣</span><span style={{color:"#374151",fontWeight:500}}>Intensive / Therapy</span>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:5,background:"#fff",borderRadius:8,padding:"5px 11px",border:"1.5px solid #93C5FD",fontSize:11}}>
           <span style={{color:"#2563EB",fontWeight:700}}>🔵</span><span style={{color:"#374151",fontWeight:500}}>Medical appt</span>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:5,background:"#fff",borderRadius:8,padding:"5px 11px",border:"1.5px solid #05996940",fontSize:11}}>
+          <div style={{width:5,height:16,background:"#059669",borderRadius:2}}/>
+          <span style={{color:"#374151",fontWeight:500}}>Confirmed</span>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:5,background:"#fff",borderRadius:8,padding:"5px 11px",border:"1.5px solid #F59E0B40",fontSize:11}}>
+          <div style={{width:5,height:16,background:"#F59E0B",borderRadius:2}}/>
+          <span style={{color:"#374151",fontWeight:500}}>Needs coverage</span>
         </div>
       </div>
 
