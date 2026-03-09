@@ -44,6 +44,8 @@ const INTENSIVE_BLOCKS = [
   { start: "2026-11-30", end: "2026-12-04" },
 ];
 
+const SUMMER_BLOCK = { start: "2026-06-25", end: "2026-08-26" };
+
 const ALL_PORTLAND_BLOCKS = [
   { start: "2026-08-02", end: "2026-08-20", note: "Parents out of country" },
 ];
@@ -117,13 +119,14 @@ function getDayData(y,m,d,confirmed){
   if(CANCELLED.has(ds)) return {ds,loc:"none",label:"No shift",note:CANCELLED_NOTES[ds],nurse:null,isCancelled:true};
 
   const isIntensive=inRange(ds,INTENSIVE_BLOCKS);
+  const isSummer=ds>=SUMMER_BLOCK.start&&ds<=SUMMER_BLOCK.end;
   const portlandBlock=ALL_PORTLAND_BLOCKS.find(b=>ds>=b.start&&ds<=b.end);
   const med=MEDICAL_APPTS[ds];
   const noSchool=NO_SCHOOL_SHIFT.includes(ds);
 
   let loc=std.loc, label=std.label, note=null, isMedical=false;
 
-  if(isIntensive){ label="7:30 AM–6:00 PM"; note="🏥 CIT Intensive"; }
+  if(isIntensive && dow!==6){ label="7:30 AM–6:00 PM"; note="🏥 CIT Intensive"; }
   else if(med){
     isMedical=true; label=med.label;
     note=`🔵 ${med.appt} — ${med.apptTime}`;
@@ -131,6 +134,7 @@ function getDayData(y,m,d,confirmed){
   }
   else if(portlandBlock){ loc="papas"; note=`⚠️ ${portlandBlock.note}`; }
   else if(noSchool){ label="7:30 AM–5:00 PM"; loc="moms"; }
+  else if(isSummer){ label= dow===4 ? "7:30 AM–7:00 PM" : "7:30 AM–5:00 PM"; }
 
   // Apply location override (specific days Kylee is at Mom's despite normal Portland schedule)
   const override=LOCATION_OVERRIDES[ds];
