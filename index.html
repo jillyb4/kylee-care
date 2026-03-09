@@ -31,7 +31,7 @@ const STANDARD = {
   1: { loc: "moms",  label: "2:30–10:00 PM" },
   2: { loc: "papas", label: "12:00–9:00 PM" },
   3: { loc: "moms",  label: "2:30–10:00 PM" },
-  4: { loc: "papas", label: "1:00–9:00 PM"  },
+  4: { loc: "moms",  label: "1:00–9:00 PM"  },
   5: { loc: "papas", label: "1:30–8:30 PM"  },
   6: { loc: "papas", label: "9:00 AM–5:00 PM" },
   0: null,
@@ -50,6 +50,7 @@ const ALL_PORTLAND_BLOCKS = [
 
 // Days when Kylee is at Mom's/Ridgefield despite normal schedule saying Portland
 const LOCATION_OVERRIDES = {
+  "2026-06-13": { loc: "moms", label: "9:00 AM–5:00 PM" }, // Sat — at Ridgefield night before (Alex Warren Jun 12)
   "2026-07-30": { loc: "moms", label: "2:30–10:00 PM" }, // Thu
   "2026-07-31": { loc: "moms", label: "2:30–10:00 PM" }, // Fri
   "2026-08-01": { loc: "moms", label: "9:00 AM–5:00 PM" }, // Sat (no shift – concert)
@@ -60,10 +61,10 @@ const LOCATION_OVERRIDES = {
 
 const MEDICAL_APPTS = {
   "2026-03-11": { appt: "Pediatric Echo Lab", apptTime: "10:45 AM", label: "2:30–10:00 PM", location: "OHSU Doernbecher", noEarlyNurse: true },
-  "2026-05-15": { appt: "Office Visit",       apptTime: "10:30 AM", label: "9:30 AM–5:30 PM",  location: "OHSU Doernbecher"   },
+  "2026-05-15": { appt: "Office Visit",       apptTime: "10:30 AM", label: "9:30 AM–5:30 PM",  location: "OHSU Doernbecher", loc: "moms"   },
   "2026-06-02": { appt: "Neurology/Botox",    apptTime: "2:00 PM",  label: "1:00 PM–9:00 PM",  location: "OHSU Doernbecher"   },
   "2026-06-08": { appt: "Endocrinology",      apptTime: "10:30 AM", label: "9:30 AM–5:30 PM",  location: "Randall Children's" },
-  "2026-09-01": { appt: "Office Visit",       apptTime: "11:00 AM", label: "10:00 AM–6:00 PM", location: "OHSU Doernbecher"   },
+  "2026-09-01": { appt: "Office Visit", apptTime: "11:00 AM", label: "10:00 AM–6:00 PM", location: "OHSU Doernbecher", hasTherapy: true },
 };
 
 const CANCELLED_NOTES = {
@@ -75,7 +76,21 @@ const CANCELLED_NOTES = {
 };
 const CANCELLED = new Set(Object.keys(CANCELLED_NOTES));
 
-const NO_SCHOOL_SHIFT = ["2026-03-27","2026-04-24","2026-05-25","2026-05-29"];
+const NO_SCHOOL_SHIFT = [
+  // Spring 2026
+  "2026-03-27","2026-04-24","2026-05-25","2026-05-29",
+  // Fall 2026
+  "2026-09-07", // Labor Day
+  "2026-10-09", // Cispus Break Day
+  "2026-10-12", // Staff PD Day
+  "2026-11-11", // Veterans Day
+  "2026-11-26", // Thanksgiving
+  "2026-11-27", // Fall Break
+  "2026-12-07", // Staff PD Day
+  // Winter Break Dec 21–31
+  "2026-12-21","2026-12-22","2026-12-23","2026-12-24","2026-12-25",
+  "2026-12-28","2026-12-29","2026-12-30","2026-12-31",
+];
 
 const SEED_CONFIRMED = {
   "2026-03-09": "KC (Avail)",
@@ -108,20 +123,20 @@ function getDayData(y,m,d,confirmed){
 
   let loc=std.loc, label=std.label, note=null, isMedical=false;
 
-  if(isIntensive){ loc="papas"; label="7:30 AM–6:00 PM"; }
+  if(isIntensive){ label="7:30 AM–6:00 PM"; note="🏥 CIT Intensive"; }
   else if(med){
     isMedical=true; label=med.label;
     note=`🔵 ${med.appt} — ${med.apptTime}`;
-    loc="papas";
+    if(med.loc) loc=med.loc;
   }
   else if(portlandBlock){ loc="papas"; note=`⚠️ ${portlandBlock.note}`; }
-  else if(noSchool){ label="7:30 AM–5:00 PM"; }
+  else if(noSchool){ label="7:30 AM–5:00 PM"; loc="moms"; }
 
   // Apply location override (specific days Kylee is at Mom's despite normal Portland schedule)
   const override=LOCATION_OVERRIDES[ds];
   if(override && !isIntensive && !isMedical){ loc=override.loc; label=override.label; note=null; }
 
-  const isTherapy = !isIntensive && !isMedical && [2,4].includes(dow);
+  const isTherapy = !isIntensive && [2,4].includes(dow) && (!isMedical || med?.hasTherapy);
   const therapyTime = dow===2 ? "2–3 PM" : dow===4 ? "2–6 PM" : null;
 
   return {ds,loc,label,note,nurse:confirmed[ds]||null,isIntensive,isMedical,isTherapy,therapyTime};
@@ -168,14 +183,16 @@ function DayCell({d,y,m,confirmed,selected,onClick}){
   const {isCancelled,nurse,isMedical,isIntensive}=data;
 
   const statusColor = isCancelled ? "#E5E7EB" : nurse ? "#059669" : "#F59E0B";
-  const locBorder = selected?"#1A7A6E":isToday?"#F59E0B":isCancelled?"#E5E7EB":loc.color+"50";
-  const bg = isCancelled ? "#F9FAFB" : !nurse ? "#FFFBEB" : loc.light;
+  const locBorder = selected?"#1A7A6E":isToday?"#F59E0B":isCancelled?"#E5E7EB":loc.color+"80";
+  // Left stripe = location color so you can instantly see Mom's/Papa's/CIT
+  const stripeColor = isCancelled ? "#E5E7EB" : loc.color;
+  const bg = isCancelled ? "#F9FAFB" : loc.light;
 
   return (
     <div onClick={()=>onClick(d)} style={{
       background:bg,
       border:`1.5px solid ${locBorder}`,
-      borderLeft:`6px solid ${statusColor}`,
+      borderLeft:`6px solid ${stripeColor}`,
       borderRadius:10,
       padding:"7px 6px 7px 7px",minHeight:80,cursor:"pointer",
       transition:"all 0.15s",opacity:isCancelled?0.55:1,
@@ -183,21 +200,22 @@ function DayCell({d,y,m,confirmed,selected,onClick}){
     }}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:2}}>
         <span style={{fontWeight:isToday?800:600,fontSize:12,fontFamily:"'DM Mono',monospace",
-          color:isToday?"#F59E0B":isCancelled?"#9CA3AF":loc.color}}>{d}</span>
+          color:isToday?"#D97706":isCancelled?"#9CA3AF":loc.color}}>{d}</span>
         {isCancelled && <span style={{fontSize:8,color:"#9CA3AF",border:"1px solid #E5E7EB",borderRadius:3,padding:"1px 3px"}}>⬜</span>}
         {!isCancelled && (
           <div style={{display:"flex",gap:2,alignItems:"center"}}>
-            {isIntensive && <span style={{fontSize:9,lineHeight:1}}>🟣</span>}
             {isMedical && <span style={{fontSize:9,lineHeight:1}}>🔵</span>}
+            {isIntensive && <span style={{fontSize:9,lineHeight:1}}>🏥</span>}
           </div>
         )}
       </div>
       {!isCancelled && <>
-        <div style={{fontSize:9,color:loc.color,fontWeight:700,lineHeight:1.3}}>{data.label}</div>
-        {data.isTherapy && <div style={{fontSize:8,color:"#8B3A8B",fontWeight:600,marginTop:1}}>🟣 therapy {data.therapyTime}</div>}
+        <div style={{fontSize:10,color:loc.color,fontWeight:800,lineHeight:1.3,marginBottom:1}}>{data.label}</div>
+        {data.isIntensive && <div style={{fontSize:8,color:"#7C3AED",fontWeight:700,marginTop:1}}>🏥 CIT during shift</div>}
+        {data.isTherapy && !data.isIntensive && <div style={{fontSize:8,color:"#7C3AED",fontWeight:600,marginTop:1}}>therapy {data.therapyTime}</div>}
         {nurse
-          ? <div style={{fontSize:9,color:"#065F46",fontWeight:700,marginTop:3,background:"#D1FAE5",borderRadius:4,padding:"2px 5px",display:"inline-block",maxWidth:"100%",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",border:"1px solid #6EE7B7"}}>✓ {nurse}</div>
-          : <div style={{fontSize:9,color:"#92400E",fontWeight:800,marginTop:3,background:"#FEF3C7",borderRadius:4,padding:"2px 5px",display:"inline-block",border:"1px solid #FCD34D"}}>⚠ OPEN</div>
+          ? <div style={{fontSize:9,color:"#065F46",fontWeight:700,marginTop:2,background:"#D1FAE5",borderRadius:4,padding:"2px 5px",display:"inline-block",maxWidth:"100%",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",border:"1px solid #6EE7B7"}}>✓ {nurse}</div>
+          : <div style={{fontSize:9,color:"#92400E",fontWeight:800,marginTop:2,background:"#FEF3C7",borderRadius:4,padding:"2px 5px",display:"inline-block",border:"1px solid #FCD34D"}}>⚠ OPEN</div>
         }
         {!nurse && isMedical && <div style={{fontSize:8,color:"#2563EB",marginTop:2,lineHeight:1.2}}>{data.note}</div>}
       </>}
@@ -250,9 +268,9 @@ function Detail({d,y,m,confirmed,onClose,onSave,onRemove}){
           <div style={{fontSize:10,color:"#6B7280",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em"}}>Hours</div>
           <div style={{fontSize:13,fontWeight:700,color:"#374151",marginTop:2}}>{data.label}</div>
         </div>
-        {data.isIntensive && <div style={{background:"#F4E6F4",borderRadius:10,padding:"9px 14px"}}>
-          <div style={{fontSize:10,color:"#8B3A8B",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em"}}>Type</div>
-          <div style={{fontSize:13,fontWeight:700,color:"#8B3A8B",marginTop:2}}>🏥 Intensive Week</div>
+        {data.isIntensive && <div style={{background:"#F5F3FF",borderRadius:10,padding:"9px 14px"}}>
+          <div style={{fontSize:10,color:"#6B7280",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em"}}>Service During Shift</div>
+          <div style={{fontSize:13,fontWeight:700,color:"#7C3AED",marginTop:2}}>🏥 CIT Intensive Therapy</div>
         </div>}
       </div>
 
@@ -427,8 +445,8 @@ function App(){
             <span style={{color:"#374151",fontWeight:500}}>{v.icon} {v.label}</span>
           </div>
         ))}
-        <div style={{display:"flex",alignItems:"center",gap:5,background:"#fff",borderRadius:8,padding:"5px 11px",border:"1.5px solid #8B3A8B40",fontSize:11}}>
-          <span style={{fontSize:10}}>🟣</span><span style={{color:"#374151",fontWeight:500}}>Intensive / Therapy</span>
+        <div style={{display:"flex",alignItems:"center",gap:5,background:"#fff",borderRadius:8,padding:"5px 11px",border:"1.5px solid #7C3AED40",fontSize:11}}>
+          <span style={{fontSize:10}}>🏥</span><span style={{color:"#374151",fontWeight:500}}>CIT / Therapy noted</span>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:5,background:"#fff",borderRadius:8,padding:"5px 11px",border:"1.5px solid #93C5FD",fontSize:11}}>
           <span style={{color:"#2563EB",fontWeight:700}}>🔵</span><span style={{color:"#374151",fontWeight:500}}>Medical appt</span>
@@ -454,8 +472,3 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
 </html>
-
-
-
-
-Ky schedule and dashboard - Claude
