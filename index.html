@@ -106,4 +106,235 @@
 <body>
 
 <div class="screen-controls">
-  <label>
+  <label>Month</label><select id="monthSel"></select>
+  <label>Year</label><select id="yearSel"><option value="2026" selected>2026</option><option value="2027">2027</option></select>
+  <button class="print-btn" onclick="window.print()">🖨️ Print / Save PDF</button>
+  <span style="font-size:11px;color:#6B7280">Tip: Set Layout → Landscape in print dialog</span>
+</div>
+<div class="page" id="page"></div>
+
+<script>
+// NURSE ROSTER (Avail Home Health):
+//   KC  = Clasey, Katelyn — RN — WA & OR license
+//   MS  = Schneider, Mariah — LPN — WA & OR license — approved 2:00–8PM every other Wed
+//   Sydney S. = Sketoe, Sydney — RN — WA LICENSE ONLY (cannot work Portland/OR shifts)
+
+const LOCATIONS = {
+  moms:  { label: "Mom's · Ridgefield",   color: "#2D7D6F", cls: "moms",  icon: "🏠", license: "WA license only" },
+  papas: { label: "Papa's · Portland",    color: "#1E5FA8", cls: "papas", icon: "🏡", license: "WA & OR license" },
+  cit:   { label: "Intensive · Portland", color: "#1E5FA8", cls: "cit",   icon: "🏥", license: "WA & OR license" },
+  none:  { label: "—",                    color: "#9CA3AF", cls: "none",  icon: "",   license: "" },
+};
+
+const STANDARD = {
+  1: { loc: "moms",  label: "2:30–10:00 PM" },
+  2: { loc: "papas", label: "12:00–9:00 PM" },
+  3: { loc: "moms",  label: "2:30–10:00 PM" },
+  4: { loc: "moms",  label: "1:00–9:00 PM"  },
+  5: { loc: "papas", label: "1:30–8:30 PM"  },
+  6: { loc: "papas", label: "9:00 AM–5:00 PM" },
+  0: null,
+};
+
+const INTENSIVE_BLOCKS = [
+  { start: "2026-03-30", end: "2026-04-10" },
+  { start: "2026-06-22", end: "2026-07-10" },
+  { start: "2026-11-23", end: "2026-11-25" },
+  { start: "2026-11-30", end: "2026-12-04" },
+];
+
+const SUMMER_BLOCK = { start: "2026-06-25", end: "2026-08-26" };
+
+const ALL_PORTLAND_BLOCKS = [
+  { start: "2026-08-02", end: "2026-08-20", note: "Parents out of country" },
+];
+
+const LOCATION_OVERRIDES = {
+  // MS approved 2:00–8:00 PM every other Wednesday — add dates here as confirmed
+  "2026-04-15": { loc: "moms", label: "2:00–8:00 PM" },
+  "2026-04-29": { loc: "moms", label: "2:00–8:00 PM" },
+  "2026-06-13": { loc: "moms", label: "9:00 AM–5:00 PM" },
+  "2026-07-30": { loc: "moms", label: "2:30–10:00 PM" },
+  "2026-07-31": { loc: "moms", label: "2:30–10:00 PM" },
+  "2026-08-01": { loc: "moms", label: "9:00 AM–5:00 PM" },
+  "2026-08-21": { loc: "moms", label: "2:30–10:00 PM" },
+  "2026-08-22": { loc: "moms", label: "9:00 AM–5:00 PM" },
+  "2026-08-25": { loc: "moms", label: "2:30–10:00 PM" },
+};
+
+const MEDICAL_APPTS = {
+  "2026-03-11": { appt: "Pediatric Echo Lab", apptTime: "10:45 AM", label: "2:30–10:00 PM",    location: "OHSU Doernbecher",   noEarlyNurse: true },
+  "2026-05-15": { appt: "Office Visit",       apptTime: "10:30 AM", label: "9:30 AM–5:30 PM",  location: "OHSU Doernbecher",   loc: "moms" },
+  "2026-06-02": { appt: "Neurology/Botox",    apptTime: "2:00 PM",  label: "1:00 PM–9:00 PM",  location: "OHSU Doernbecher" },
+  "2026-06-08": { appt: "Endocrinology",      apptTime: "10:30 AM", label: "9:30 AM–5:30 PM",  location: "Randall Children's" },
+  "2026-09-01": { appt: "Office Visit",       apptTime: "11:00 AM", label: "10:00 AM–6:00 PM", location: "OHSU Doernbecher",   hasTherapy: true },
+};
+
+const CANCELLED_NOTES = {
+  "2026-03-14": "🎉 Unified Prom",
+  "2026-06-12": "🎵 Alex Warren",
+  "2026-07-14": "🎵 Hilary Duff",
+  "2026-08-01": "🎵 Ed Sheeran",
+  "2026-08-31": "🎵 Noah Kahan",
+};
+
+const NO_SCHOOL_SHIFT = [
+  "2026-03-27","2026-04-24","2026-05-25","2026-05-29",
+  "2026-09-07","2026-10-09","2026-10-12","2026-11-11","2026-11-26","2026-11-27","2026-12-07",
+  "2026-12-21","2026-12-22","2026-12-23","2026-12-24","2026-12-25",
+  "2026-12-28","2026-12-29","2026-12-30","2026-12-31",
+];
+
+// Dates where Avail schedule doesn't match what was requested — shows red on calendar
+const CONFLICT_FLAGS = {
+  "2026-04-01": "⚠ Avail shows 2:30–9PM · CIT intensive · Sydney WA-only, can't be in Portland",
+  "2026-04-08": "⚠ Avail shows 2:30–9PM · does not match CIT intensive 7:30AM–6PM",
+};
+
+const STORAGE_KEY = "kylee_confirmed_v1";
+const SEED_CONFIRMED = {
+  // March 2026
+  "2026-03-09": "KC (Avail)",
+  "2026-03-11": "MS (Avail)",
+  "2026-03-16": "KC (Avail)",
+  "2026-03-25": "MS (Avail)",
+  // April 2026
+  "2026-04-01": "KC + Sydney S. NBOR (Avail)",
+  "2026-04-06": "KC (Avail)",
+  "2026-04-08": "KC (Avail)",
+  "2026-04-15": "MS (Avail)",
+  "2026-04-29": "MS (Avail)",
+};
+
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+function isoDate(y,m,d){ return `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`; }
+function inRange(ds,ranges){ return ranges.some(r=>ds>=r.start&&ds<=r.end); }
+function loadConfirmed(){ try{ const r=localStorage.getItem(STORAGE_KEY); if(r) return JSON.parse(r); }catch(e){} return {...SEED_CONFIRMED}; }
+
+function getDayData(y,m,d,confirmed){
+  const ds=isoDate(y,m,d);
+  const dow=new Date(y,m,d).getDay();
+  const std=STANDARD[dow];
+  if(!std) return null;
+  if(CANCELLED_NOTES[ds]) return {ds,loc:"none",label:"No shift",note:CANCELLED_NOTES[ds],nurse:null,isCancelled:true};
+
+  const isIntensive=inRange(ds,INTENSIVE_BLOCKS);
+  const isSummer=ds>=SUMMER_BLOCK.start&&ds<=SUMMER_BLOCK.end;
+  const portlandBlock=ALL_PORTLAND_BLOCKS.find(b=>ds>=b.start&&ds<=b.end);
+  const med=MEDICAL_APPTS[ds];
+  const noSchool=NO_SCHOOL_SHIFT.includes(ds);
+  const conflictNote=CONFLICT_FLAGS[ds]||null;
+
+  let loc=std.loc, label=std.label, note=null, isMedical=false;
+
+  if(isIntensive && dow!==6){ loc="cit"; label="7:30 AM–6:00 PM"; note="🏥 CIT Intensive"; }
+  else if(med){ isMedical=true; label=med.label; note=`🔵 ${med.appt} — ${med.apptTime}`; if(med.loc) loc=med.loc; }
+  else if(portlandBlock){ loc="papas"; note=`⚠️ ${portlandBlock.note}`; }
+  else if(noSchool){ label="7:30 AM–5:00 PM"; loc="moms"; }
+  else if(isSummer){ label=dow===4?"7:30 AM–7:00 PM":"7:30 AM–5:00 PM"; }
+
+  const override=LOCATION_OVERRIDES[ds];
+  if(override&&!isIntensive&&!isMedical){ loc=override.loc; label=override.label; note=null; }
+
+  const isTherapy=!isIntensive&&[2,4].includes(dow)&&(!isMedical||med?.hasTherapy);
+  const therapyTime=dow===2?"2–3 PM":dow===4?"2–6 PM":null;
+
+  return {ds,loc,label,note,nurse:confirmed[ds]||null,isIntensive,isMedical,isTherapy,therapyTime,conflictNote};
+}
+
+function calcStats(y,m,confirmed){
+  const days=new Date(y,m+1,0).getDate();
+  let total=0,filled=0,needs=0,cancelled=0;
+  for(let d=1;d<=days;d++){
+    const data=getDayData(y,m,d,confirmed);
+    if(!data) continue;
+    if(data.isCancelled){cancelled++;continue;}
+    total++; if(data.nurse) filled++; else needs++;
+  }
+  return {total,filled,needs,cancelled};
+}
+
+function renderPage(y,m){
+  const confirmed=loadConfirmed();
+  const days=new Date(y,m+1,0).getDate();
+  const first=new Date(y,m,1).getDay();
+  const s=calcStats(y,m,confirmed);
+  const today=new Date().toISOString().slice(0,10);
+  const pct=s.total?Math.round(s.filled/s.total*100):0;
+
+  let gridHtml='';
+  for(let i=0;i<first;i++) gridHtml+=`<div class="cell empty"></div>`;
+  for(let d=1;d<=days;d++){
+    const data=getDayData(y,m,d,confirmed);
+    if(!data){gridHtml+=`<div class="cell empty"></div>`;continue;}
+    if(data.isCancelled){
+      gridHtml+=`<div class="cell cancelled"><div class="cell-date">${d}</div><div class="cell-cancelled-label">No shift</div><div class="cell-cancelled-label" style="font-size:7px;margin-top:2px">${data.note}</div></div>`;
+      continue;
+    }
+    const loc=LOCATIONS[data.loc];
+    const isOpen=!data.nurse;
+    const isToday=isoDate(y,m,d)===today;
+    const isConflict=!!data.conflictNote;
+
+    const cellClass=isConflict?'conflict':loc.cls;
+    const openClass=(!isConflict&&isOpen)?' open':'';
+    const todayStyle=isToday&&!isConflict?' style="outline:2px solid #F59E0B;outline-offset:1px"':'';
+
+    gridHtml+=`<div class="cell ${cellClass}${openClass}"${todayStyle}>
+      <div class="cell-date">${d}${isToday?' ●':''}</div>
+      ${isConflict?`<div class="cell-conflict-flag">🔴 NEEDS REVIEW</div>`:''}
+      <div class="cell-time">${data.label}</div>
+      ${data.isIntensive&&!isConflict?`<div class="cell-therapy">🏥 CIT intensive</div>`:''}
+      ${data.isTherapy&&!data.isIntensive?`<div class="cell-therapy">therapy ${data.therapyTime}</div>`:''}
+      ${data.nurse?`<div class="cell-nurse">✓ ${data.nurse}</div>`:`<div class="cell-open">⚠ OPEN</div>`}
+      ${isConflict?`<div class="cell-note" style="color:#9F1239">${data.conflictNote}</div>`:''}
+      ${data.note&&!data.nurse&&!isConflict?`<div class="cell-note">${data.note}</div>`:''}
+      <div class="license-tag">${loc.license}</div>
+    </div>`;
+  }
+
+  document.getElementById('page').innerHTML=`
+    <div class="page-header">
+      <div><div class="subtitle">Kylee Young · Nursing Schedule</div><div class="title">2026 Coverage Calendar</div><div class="agencies">Avail Home Health &amp; Team Select Home Care</div></div>
+      <div><div class="month-name">${MONTHS[m]}</div><div class="month-year">${y}</div></div>
+    </div>
+    <div class="stats-bar">
+      <div class="stat"><span class="stat-num" style="color:#1A7A6E">${s.total}</span><span class="stat-label">Total Shifts</span></div>
+      <div class="stat"><span class="stat-num" style="color:#059669">${s.filled}</span><span class="stat-label">Confirmed ✓</span></div>
+      <div class="stat"><span class="stat-num" style="color:#D97706">${s.needs}</span><span class="stat-label">Needs Coverage</span></div>
+      ${s.cancelled?`<div class="stat"><span class="stat-num" style="color:#9CA3AF">${s.cancelled}</span><span class="stat-label">No Shift</span></div>`:''}
+      <div style="flex:1"></div>
+      <div style="font-size:12px;font-weight:700;color:#374151;margin-right:8px">${pct}% covered</div>
+      <div style="width:100px;height:7px;background:#F3F4F6;border-radius:4px;overflow:hidden"><div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#059669,#10B981);border-radius:4px"></div></div>
+    </div>
+    <div class="calendar">
+      <div class="day-headers">${DAYS.map(d=>`<div class="day-header">${d}</div>`).join('')}</div>
+      <div class="grid">${gridHtml}</div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-stripe" style="background:#2D7D6F"></div>🏠 Mom's · Ridgefield — WA only</div>
+      <div class="legend-item"><div class="legend-stripe" style="background:#1E5FA8"></div>🏡 Papa's · Portland — WA &amp; OR</div>
+      <div class="legend-item"><div class="legend-stripe" style="background:#1E5FA8"></div>🏥 Intensive · Portland — WA &amp; OR</div>
+      <div class="legend-item"><span>🏥</span>CIT / therapy noted in shift</div>
+      <div class="legend-item"><span style="color:#2563EB">🔵</span>Medical appt</div>
+      <div class="legend-item"><div class="cell-open">⚠ OPEN</div>Needs coverage</div>
+      <div class="legend-item"><div class="cell-nurse">✓ Nurse</div>Confirmed</div>
+      <div class="legend-item"><div style="width:5px;height:16px;border-radius:2px;background:#E11D48"></div><span style="color:#9F1239">🔴 Needs Review</span></div>
+    </div>
+    <div class="footer">
+      <span>Contacts: <strong>Jill (Mom)</strong> (503) 997-7575 · <strong>Jason (Dad)</strong> (503) 997-5779</span>
+      <span>Printed ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</span>
+    </div>`;
+}
+
+const sel=document.getElementById('monthSel');
+MONTHS.forEach((nm,i)=>{const o=document.createElement('option');o.value=i;o.textContent=nm;sel.appendChild(o);});
+const t=new Date(); sel.value=t.getMonth(); document.getElementById('yearSel').value=t.getFullYear();
+sel.addEventListener('change',()=>renderPage(+document.getElementById('yearSel').value,+sel.value));
+document.getElementById('yearSel').addEventListener('change',()=>renderPage(+document.getElementById('yearSel').value,+sel.value));
+renderPage(t.getFullYear(),t.getMonth());
+</script>
+</body>
+</html>
